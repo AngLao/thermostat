@@ -26,12 +26,12 @@ qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
 
-#波形图qcustomplot2 dll路径
+#波形图qcustomplot2库路径
 LIBS += -L$$PWD/qcustomplot -lqcustomplot2
 INCLUDEPATH += $$PWD/qcustomplot
 DEPENDPATH += $$PWD/qcustomplot
 
-#mqtt dll路径
-LIBS += -L$$PWD/mqtt -lQt6Mqtt
-INCLUDEPATH += $$PWD/mqtt
-DEPENDPATH += $$PWD/mqtt
+#mqtt库路径
+LIBS += -L$$PWD/QtMqtt -lQt6Mqtt
+INCLUDEPATH += $$PWD/QtMqtt
+DEPENDPATH += $$PWD/QtMqtt

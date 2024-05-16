@@ -159,6 +159,7 @@ void MainWindows::MqttInit()
             mqttClient->setClientId(ui->mqtt_id->text());
             mqttClient->setUsername(ui->mqtt_user->text());
             mqttClient->setPassword(ui->mqtt_password->text());
+            ui->RxDataTextEdit->clear();
             mqttClient->connectToHost();
             ui->connect_mqtt->setText("断开连接");
         }else{
@@ -175,7 +176,6 @@ void MainWindows::MqttInit()
         }else if(state == QMqttClient::Connected){
             mqttClient->subscribe(QString("trage"));
             mqttClient->subscribe(QString("measure"));
-            ui->RxDataTextEdit->clear();
             ui->RxDataTextEdit->append("mqtt服务器连接成功");
             qDebug()<<"mqtt服务器连接成功";
         }else if(state == QMqttClient::Disconnected){
@@ -183,7 +183,8 @@ void MainWindows::MqttInit()
             qDebug()<<"断开mqtt服务器连接";
         }
     });
-    QObject::connect(mqttClient, &QMqttClient::messageReceived, this, [=](const QByteArray &message, const QMqttTopicName &topic) {
+
+    connect(mqttClient, &QMqttClient::messageReceived, this, [=](const QByteArray &message, const QMqttTopicName &topic) {
         qDebug()<< QLatin1String(" Received Topic: ")
                         + topic.name()
                         + QLatin1String(" Message: ")
