@@ -39,6 +39,7 @@ void oled_task(void* arg)
     OLED_ShowString(0,  6, "Kp:",   8);
     OLED_ShowString(64, 6, "Ki:",   8);
     OLED_ShowString(0,  7, "PWM:",   8);
+    OLED_ShowString(64,  7, "ts:",   8);
 
     while (true)
     {    
@@ -74,7 +75,9 @@ void oled_task(void* arg)
         OLED_ShowNum(90, 6, -get_temperature_controller_ki(), 5, 8);
         
         //PWM输出显示更新
-        OLED_ShowNum(90, 7, get_pwm_value(), 5, 8);
+        OLED_ShowNum(25, 7, get_pwm_value(), 5, 8);
+        //PWM输出显示更新
+        OLED_ShowNum(90, 7, temperature_device_online(), 1, 8);
 
         vTaskDelay(100/portTICK_PERIOD_MS);
     }

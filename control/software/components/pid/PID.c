@@ -89,8 +89,8 @@ float PIDController_Update(PIDController *pid, float setpoint, float measurement
 }
 
 
-static PIDController temperature_controller = { .Kp = -4820,
-                                                .Ki = -123,
+static PIDController temperature_controller = { .Kp = -5500,
+                                                .Ki = -50,
                                                 .Kd = 0,
                                                 .T = 0.2,
                                                 .tau = 1,

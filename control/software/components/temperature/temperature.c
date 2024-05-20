@@ -1,15 +1,18 @@
 #include "temperature.h"
-#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "esp_log.h"
+#include "math.h"
 
-#define TEMP_BUS GPIO_NUM_23
-#define digitalWrite gpio_set_level
-static int resolution = 11;
+#include "driver_ds18b20.h"
+#include "driver_ds18b20_interface.h"
+
 //预留了4个温度传感器接口
+static uint8_t rom_buf[4][8];
+static ds18b20_handle_t ds18b20_sensor;    
+static ds18b20_resolution_t resolution = DS18B20_RESOLUTION_11BIT;
 static uint8_t online_device = 0;
-static DeviceAddress tempSensors[4];
 
 static const float MAX_EXPECT_TEMPERATURE = 70.00;
 static const float MIN_EXPECT_TEMPERATURE = 20.00;
@@ -17,19 +20,6 @@ static float expect_temperature = 45.00;
 static float measure_temperature = 0.00;
 
 float raw_temperature = 0;
-
-void getTempAddresses(DeviceAddress *tempSensorAddresses) 
-{
-	unsigned int numberFound = 0;
-	reset_search();
-	// search for 2 addresses on the oneWire protocol
-	while (search(tempSensorAddresses[numberFound],true)) {
-		vTaskDelay(50 / portTICK_PERIOD_MS);
-		numberFound++;
-		if (numberFound == 2) break;
-	}
-	return;
-}
 
 float get_expect_temperature(void) 
 {
@@ -43,10 +33,7 @@ float get_measure_temperature(void)
 
 uint8_t temperature_device_online(void)
 {
-	if(online_device == 0)
-		return 0;
-	else
-		return 1;
+	return online_device;
 }
 
 void set_expect_temperature(float temperature)
@@ -58,66 +45,92 @@ void set_expect_temperature(float temperature)
 		expect_temperature = MIN_EXPECT_TEMPERATURE;
 }
 
-static void search_single_device(void)
-{
-	online_device = 0;
-	while (true) {
-		if (!search(tempSensors[0],true)) {
-			vTaskDelay(100 / portTICK_PERIOD_MS);
-			continue;
-		}
-		ds18b20_reset();
-		ds18b20_setResolution(tempSensors,1,resolution);
-		break;
-	}
-	online_device = 1;
-}
 
-static float mid_filter(float value)
+// 卡尔曼滤波
+static float kalman_filter(float z)
 {
-	static const char N = 12;
-	unsigned int count, i, j, temp;
-    float value_buf[N];
-    float  sum = 0.0;
-    for( count = 0; count < N; count++ )
-    {
-        value_buf[count] =  value;
-    }
-    for( j = 0; j < N - 1; j++ )
-    {
-        for( i = 0; i < N - j - 1; i++ )
-        {
-            if( value_buf[i] > value_buf[i + 1] )
-            {
-                temp = value_buf[i];
-                value_buf[i] = value_buf[i + 1];
-                value_buf[i + 1] = temp;
-            }
-        }
-    }
-    for( count = 2; count < N - 2; count++ )
-    {
-        sum += value_buf[count];
-    }
-    return (float)( sum / ( N - 4 ) );
+    static float x_hat = 0; // 估计的状态值
+    static float P = 0;     // 估计的误差协方差
+    static float Q = 0.001;  // 测量噪声协方差
+    static float R = 0.02;   // 过程噪声协方差
+
+    // 预测
+    float x_hat_minus = x_hat;
+    float P_minus = P + Q;
+
+    // 更新
+    float K = P_minus / (P_minus + R);
+    x_hat = x_hat_minus + K * (z - x_hat_minus);
+    P = (1 - K) * P_minus;
+
+    return x_hat;
 }
 
 void temperature_task(void* arg)
 {
-	ds18b20_init(TEMP_BUS);
-	search_single_device();
-	while (1) {
-		ds18b20_requestTemperatures();
-		raw_temperature = ds18b20_getTempC(tempSensors[0]);
+    /* link interface function */
+    DRIVER_DS18B20_LINK_INIT(&ds18b20_sensor, ds18b20_handle_t);
+    DRIVER_DS18B20_LINK_BUS_INIT(&ds18b20_sensor, ds18b20_interface_init);
+    DRIVER_DS18B20_LINK_BUS_DEINIT(&ds18b20_sensor, ds18b20_interface_deinit);
+    DRIVER_DS18B20_LINK_BUS_READ(&ds18b20_sensor, ds18b20_interface_read);
+    DRIVER_DS18B20_LINK_BUS_WRITE(&ds18b20_sensor, ds18b20_interface_write);
+    DRIVER_DS18B20_LINK_DELAY_MS(&ds18b20_sensor, ds18b20_interface_delay_ms);
+    DRIVER_DS18B20_LINK_DELAY_US(&ds18b20_sensor, ds18b20_interface_delay_us);
+    DRIVER_DS18B20_LINK_ENABLE_IRQ(&ds18b20_sensor, ds18b20_interface_enable_irq);
+    DRIVER_DS18B20_LINK_DISABLE_IRQ(&ds18b20_sensor, ds18b20_interface_disable_irq);
+    DRIVER_DS18B20_LINK_DEBUG_PRINT(&ds18b20_sensor, ds18b20_interface_debug_print);
+    
+    /* ds18b20 init */
+ds18b20_init :    
+    while (ds18b20_init(&ds18b20_sensor) != 0)
+    {
+        vTaskDelay(300/portTICK_PERIOD_MS);
+    }
+     
+    
+    /* set skip rom mode */
+    if (ds18b20_set_mode(&ds18b20_sensor, DS18B20_MODE_SKIP_ROM) != 0)
+    {
+        ds18b20_interface_debug_print("ds18b20: set mode failed.\n");
+        (void)ds18b20_deinit(&ds18b20_sensor);
+        goto ds18b20_init;
+    }
+    
+    /* set default resolution */
+    if (ds18b20_scratchpad_set_resolution(&ds18b20_sensor, resolution) != 0)
+    {
+        ds18b20_interface_debug_print("ds18b20: scratchpad set resolution failed.\n");
+        (void)ds18b20_deinit(&ds18b20_sensor);
+        goto ds18b20_init;
+    }
+    
+    ds18b20_interface_debug_print("ds18b20_sensor init success ---------------------------.\n");
 
-		//数据异常
-		if((int)raw_temperature < 10 || (int)raw_temperature > 80){
-			search_single_device();
-			continue;
-		}
-		measure_temperature = mid_filter(raw_temperature);//获取滤波数据
-		
-		// printf("measure_temperature: %0.2f°C expect_temperature: %0.2f°C\n", measure_temperature, expect_temperature);
-		vTaskDelay(20 / portTICK_PERIOD_MS);
+
+	while (1) {
+        // uint8_t num = 2;
+        // if(ds18b20_search_rom(&ds18b20_sensor, rom_buf, &num) == 0){
+        //     ds18b20_get_rom(&ds18b20_sensor, rom_buf);
+        //     for (size_t x = 0; x < online_device; x++)
+        //     {
+        //         printf("ds18b20_sensor %d rom : 0X ", x);
+        //         for (size_t y = 0; y < 8; y++)
+        //         {
+        //             printf("%X ", rom_buf[x][y]);
+        //         }
+        //         printf("\n");
+        //     }
+        // }
+
+    	int16_t raw;
+        float raw_temperature = 0;
+        if(ds18b20_read(&ds18b20_sensor, (int16_t *)&raw, &raw_temperature) != 0){
+            online_device = 0;
+            goto ds18b20_init;
+        }
+        online_device = 1;
+        //数据滤波
+		measure_temperature = kalman_filter(raw_temperature);
+		vTaskDelay(100 / portTICK_PERIOD_MS);
 	}
 }
