@@ -12,8 +12,7 @@
 #include <QMouseEvent>
 #include <QTextEdit>
 
-#include "EasyPact.h"
-#include "QtMqtt/qmqttclient.h"
+#include <QWebSocket>
 
 namespace Ui {
 class MainWindows;
@@ -32,13 +31,13 @@ public:
 private:
     Ui::MainWindows *ui;
     QSerialPort *serialPort;
-    QMqttClient *mqttClient;
     bool eventFilter(QObject *, QEvent *);
     void SerialInit();
     void MqttInit();
     void TemperatureConfigInit();
 signals:
     void ClickBox();
+    void MqttSetTemp(const float value);
     void sendPackData(const char *data , const int DataLen);
     void DataReady(QByteArray& ReceiveData);
     void RecivePact(uint8_t* pData  ,uint8_t len);

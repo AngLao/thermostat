@@ -1,6 +1,10 @@
 #include "MainWindows.h"
 #include "ui_MainWindows.h"
 
+#include "EasyPact.h"
+#include "emqx/qmqtt_client.h"
+#include "emqx/qmqtt_message.h"
+
 MainWindows::MainWindows(QWidget *parent)
     : QWidget(parent)
     , ui(new Ui::MainWindows)
@@ -150,48 +154,63 @@ void MainWindows::SerialInit()
 
 void MainWindows::MqttInit()
 {
-    //清除接收框消息按钮信号和槽
-    mqttClient = new QMqttClient;
-    connect( ui->connect_mqtt,&QPushButton::clicked,this,[&](){
+    QMQTT::Client *client = new QMQTT::Client;
+
+    connect( ui->connect_mqtt,&QPushButton::clicked,this,[=](){
         if(ui->connect_mqtt->text() == "请求连接"){
-            mqttClient->setHostname(ui->mqtt_ip->text());
-            mqttClient->setPort(ui->mqtt_port->text().toInt());
-            mqttClient->setClientId(ui->mqtt_id->text());
-            mqttClient->setUsername(ui->mqtt_user->text());
-            mqttClient->setPassword(ui->mqtt_password->text());
+            client->setVersion(QMQTT::V3_1_1);
+            client->setHostName(ui->mqtt_ip->text());
+            client->setPort(ui->mqtt_port->text().toInt());
+            client->setClientId(ui->mqtt_id->text());
+            client->setUsername(ui->mqtt_user->text());
+            client->setPassword(ui->mqtt_password->text().toUtf8());
+            client->setKeepAlive(60);
+            client->connectToHost();
             ui->RxDataTextEdit->clear();
-            mqttClient->connectToHost();
             ui->connect_mqtt->setText("断开连接");
         }else{
-            mqttClient->disconnectFromHost();
+            client->disconnectFromHost();
             ui->connect_mqtt->setText("请求连接");
         }
     });
 
-    connect(mqttClient, &QMqttClient::stateChanged, this, [=](){
-        auto state = mqttClient->state();
-        if(state == QMqttClient::Connecting){
-            ui->RxDataTextEdit->append("正在连接服务器");
-            qDebug()<<"正在连接服务器";
-        }else if(state == QMqttClient::Connected){
-            mqttClient->subscribe(QString("trage"));
-            mqttClient->subscribe(QString("measure"));
-            ui->RxDataTextEdit->append("mqtt服务器连接成功");
-            qDebug()<<"mqtt服务器连接成功";
-        }else if(state == QMqttClient::Disconnected){
-            ui->RxDataTextEdit->append("断开mqtt服务器连接");
-            qDebug()<<"断开mqtt服务器连接";
-        }
+    connect(client, &QMQTT::Client::connected, this, [=](){
+        client->subscribe(QString("trage"), 0);
+        client->subscribe(QString("measure"), 0);
+        ui->RxDataTextEdit->append("mqtt服务器连接成功");
     });
 
-    connect(mqttClient, &QMqttClient::messageReceived, this, [=](const QByteArray &message, const QMqttTopicName &topic) {
-        qDebug()<< QLatin1String(" Received Topic: ")
-                        + topic.name()
-                        + QLatin1String(" Message: ")
-                        + message
-                        + QLatin1Char('\n');
-        ui->RxDataTextEdit->append("Received Topic:" + topic.name() + ", Message:" + message);
-        emit DrawMqttData(topic.name(),message.toFloat());
+    connect(client, &QMQTT::Client::disconnected, this, [=](){
+        ui->RxDataTextEdit->append("断开mqtt服务器连接");
+        qDebug()<<"断开mqtt服务器连接";
+    });
+
+    connect(client, &QMQTT::Client::subscribed, this, [=](const QString& topic, const quint8 qos = 0){
+        ui->RxDataTextEdit->append("topic:" + topic + "订阅成功");
+    });
+
+    connect(client, &QMQTT::Client::error, this, [=](const QMQTT::ClientError error){
+        ui->RxDataTextEdit->append("error");
+        qDebug()<<error;
+    });
+
+    connect(client, &QMQTT::Client::received, this, [=](const QMQTT::Message& message) {
+        ui->RxDataTextEdit->append("Received Topic:" + message.topic() + ", Message:" + message.payload());
+        emit DrawMqttData(message.topic(), message.payload().toFloat());
+    });
+
+    connect(this, &MainWindows::MqttSetTemp, this, [=](const float value) {
+        QMQTT::Message message;
+        message.setTopic("set_temp");
+        message.setPayload(QByteArray::number(value));
+        message.setRetain(1);
+        client->publish(message);
+    });
+
+
+    connect(client, &QMQTT::Client::published, this, [=](const QMQTT::Message& message) {
+        if(message.topic() == "set_temp")
+            ui->RxDataTextEdit->append("设定目标温度：" + message.payload());
     });
 }
 
@@ -232,9 +251,7 @@ void MainWindows::TemperatureConfigInit()
         easy_add_check(&senbuf);
         //发送帧数据
         SerialSendData((char*)&senbuf ,easy_return_buflen(&senbuf));
-        if(mqttClient->state() == QMqttClient::Connected){
-            mqttClient->publish(QMqttTopicName("set_temp"), ui->sb_set->text().toUtf8(), 0, 1);
-        }
+        emit MqttSetTemp(ui->sb_set->text().toDouble());
     });
 
     //滑杆操作响应
@@ -255,9 +272,7 @@ void MainWindows::TemperatureConfigInit()
         easy_add_check(&senbuf);
         //发送帧数据
         SerialSendData((char*)&senbuf ,easy_return_buflen(&senbuf));
-        if(mqttClient->state() == QMqttClient::Connected){
-            mqttClient->publish(QMqttTopicName("set_temp"), ui->sb_set->text().toUtf8(), 0, 1);
-        }
+        emit MqttSetTemp(ui->sb_set->text().toDouble());
     });
 
     //地址ID改变时响应
