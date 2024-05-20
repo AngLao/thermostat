@@ -65,7 +65,8 @@ WaveformDisplay::WaveformDisplay(QWidget *parent)
         {
             pQCustomPlot->graph(i)->data().data()->clear();
         }
-        x = 0;
+        x1 = 0;
+        x2 = 0;
         pQCustomPlot->replot();
     });
     bottomLayout->addWidget(clearWaveformButton);
@@ -104,13 +105,13 @@ WaveformDisplay::WaveformDisplay(QWidget *parent)
     waveformViewWidget = new QWidget();
     waveformViewWidget->setLayout(mainLayout);
 
-    //    //设置波形显示背景
-    //    QLinearGradient plotGradient;
-    //    plotGradient.setStart(0, 0);
-    //    plotGradient.setFinalStop(0, 350);
-    //    plotGradient.setColorAt(0, QColor("#20B2AA"));
-    //    plotGradient.setColorAt(1, QColor("#FFFACD"));
-    //    pQCustomPlot->setBackground(plotGradient);
+   // //设置波形显示背景
+   // QLinearGradient plotGradient;
+   // plotGradient.setStart(0, 0);
+   // plotGradient.setFinalStop(0, 350);
+   // plotGradient.setColorAt(0, QColor("#20B2AA"));
+   // plotGradient.setColorAt(1, QColor("#FFFACD"));
+   // pQCustomPlot->setBackground(plotGradient);
 }
 
 QWidget* WaveformDisplay::widget()
@@ -132,7 +133,7 @@ void WaveformDisplay::paintUserData(double x ,double y , int num)
     if(dynamicDisplayFlag){
         //刷新数据的时候才动态显示
         //动态x轴
-        pQCustomPlot->xAxis->setRange(x-20, 300, Qt::AlignLeft);
+        pQCustomPlot->xAxis->setRange(x, 3000, Qt::AlignHCenter);
         //设置y轴范围
         QCPRange a = pQCustomPlot->yAxis->range();
         if(y < a.lower){
@@ -162,15 +163,17 @@ void WaveformDisplay::ProcessingMessages(uint8_t *pData, uint8_t len)
     switch (id) {
     case 0x00:
         pQCustomPlot->graph(0)->setName("测量温度: "+QString::number(res));
+        paintUserData(x1, res  , id);
+        x1++;
         break;
     case 0x01:
         pQCustomPlot->graph(1)->setName("设定温度: "+QString::number(res));
+        paintUserData(x2, res  , id);
+        x2++;
         break;
     default:
         break;
     }
-    paintUserData(x, res  , id);
-    x++;
 }
 
 void WaveformDisplay::ProcessMqttMessages(QString topic, double value)
@@ -178,10 +181,11 @@ void WaveformDisplay::ProcessMqttMessages(QString topic, double value)
     //设置名称
     if(topic == "measure"){
         pQCustomPlot->graph(0)->setName("测量温度: "+QString::number(value));
-        paintUserData(x, value  , 0);
+        paintUserData(x1, value  , 0);
+        x1++;
     }else if(topic == "trage"){
         pQCustomPlot->graph(1)->setName("设定温度: "+QString::number(value));
-        paintUserData(x, value  , 1);
+        paintUserData(x2, value  , 1);
+        x2++;
     }
-    x++;
 }

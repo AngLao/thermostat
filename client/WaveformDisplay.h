@@ -26,7 +26,7 @@ private:
     void paintUserData(double x ,double y , int num);
     void lineInit();
 
-    int x=0;
+    long long int x1=0, x2=0;
 signals:
 
 };
